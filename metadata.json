@@ -1,0 +1,5 @@
+{
+  "name": "Black World",
+  "description": "A 2D multiplayer horror game where you navigate the darkness using sonar rays. Avoid monsters, find the key, and escape the void.",
+  "requestFramePermissions": []
+}

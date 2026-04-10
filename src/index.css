@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: #050505;
+  color: #e5e5e5;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-sans);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes flicker {
+  0% { opacity: 0.8; }
+  5% { opacity: 0.5; }
+  10% { opacity: 0.9; }
+  15% { opacity: 0.4; }
+  20% { opacity: 0.8; }
+  100% { opacity: 0.8; }
+}
+
+.flicker {
+  animation: flicker 4s infinite;
+}
+
