@@ -18,7 +18,15 @@ export function useGame() {
     newSocket.on('roomUpdated', (room) => setRoom(room));
     newSocket.on('gameStarted', (room) => setRoom(room));
     newSocket.on('message', (msg) => setMessages(prev => [...prev, msg]));
+    newSocket.on('exitOpened', () => setRoom(prev => prev ? { ...prev, exitDoorOpen: true } : null));
     
+    newSocket.on('gameStateUpdate', ({ monsters, players }) => {
+      setRoom(prev => {
+        if (!prev) return null;
+        return { ...prev, monsters, players };
+      });
+    });
+
     newSocket.on('playerMoved', ({ id, x, y }) => {
       setRoom(prev => {
         if (!prev) return null;
@@ -58,6 +66,10 @@ export function useGame() {
     socket?.emit('move', input);
   }, [socket]);
 
+  const stomp = useCallback(() => {
+    socket?.emit('stomp');
+  }, [socket]);
+
   return {
     socket,
     room,
@@ -68,6 +80,7 @@ export function useGame() {
     setReady,
     startGame,
     sendMessage,
-    move
+    move,
+    stomp
   };
 }

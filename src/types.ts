@@ -1,5 +1,7 @@
 
 export type GamePhase = 'Lobby' | 'Playing' | 'GameOver';
+export type DebuffType = 'Panic' | 'Concussed' | 'Stunned' | 'Broken';
+export type MonsterType = 'Hunter' | 'Screamer' | 'Mimic' | 'Patroller';
 
 export interface Player {
   id: string;
@@ -12,20 +14,36 @@ export interface Player {
   color: string;
   isAlive: boolean;
   score: number;
+  classification: string;
+  isMoving: boolean;
+  hasKey: boolean;
   debuffs: {
-    type: 'Panic' | 'Concussed' | 'Stunned' | 'Broken';
+    type: DebuffType;
     endTime: number;
   }[];
+  stats: {
+    escapedHunter: number;
+    escapedScreamer: number;
+    minesActivated: number;
+    mimicsExposed: number;
+    keysPicked: number;
+    deaths: number;
+    survivedDebuff: number;
+    survivedBroken: number;
+  };
 }
 
 export interface Monster {
   id: string;
-  type: 'Hunter' | 'Screamer' | 'Mimic' | 'Patroller';
+  type: MonsterType;
   x: number;
   y: number;
-  phase: string;
+  phase: 'Search' | 'Hunt' | 'Rest' | 'Ambush' | 'Sleep' | 'Patrol' | 'Stunned';
   phaseEndTime: number;
-  isAggressive: boolean;
+  targetId: string | null;
+  lastMarkedX?: number;
+  lastMarkedY?: number;
+  mimicForm?: string; // Player name if mimicking
 }
 
 export interface Mine {
@@ -33,6 +51,7 @@ export interface Mine {
   x: number;
   y: number;
   isExploded: boolean;
+  explosionTime?: number;
 }
 
 export interface GameState {
@@ -44,9 +63,10 @@ export interface GameState {
   keyPosition: { x: number; y: number } | null;
   exitPosition: { x: number; y: number } | null;
   exitDoorOpen: boolean;
-  map: number[][]; // 0: empty, 1: wall, 2: door
+  map: number[][];
   seed: string;
   difficulty: 'Easy' | 'Medium' | 'Hard' | 'GOD';
+  lang: 'RU' | 'EN';
 }
 
 export interface ChatMessage {
