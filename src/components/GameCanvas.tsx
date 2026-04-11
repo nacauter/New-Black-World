@@ -6,10 +6,44 @@ interface GameCanvasProps {
   room: GameState;
   playerId: string;
   onMove: (input: { x: number, y: number }) => void;
+  onStomp: () => void;
+  accessibility: boolean;
+  controls: {
+    up: string;
+    down: string;
+    left: string;
+    right: string;
+    stomp: string;
+  };
 }
 
-export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove }) => {
+export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, onStomp, accessibility, controls }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioCtx = useRef<AudioContext | null>(null);
+  const lastStatus = useRef<string>('');
+
+  const speak = (text: string) => {
+    if (!accessibility) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.2;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const playTone = (freq: number, type: OscillatorType = 'sine', duration = 0.1, vol = 0.1) => {
+    if (!accessibility) return;
+    if (!audioCtx.current) audioCtx.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = audioCtx.current.createOscillator();
+    const gain = audioCtx.current.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.current.currentTime);
+    gain.gain.setValueAtTime(vol, audioCtx.current.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.current.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.current.destination);
+    osc.start();
+    osc.stop(audioCtx.current.currentTime + duration);
+  };
   const [keys, setKeys] = useState<Set<string>>(new Set());
   const player = room.players.find(p => p.id === playerId);
   const [shake, setShake] = useState({ x: 0, y: 0 });
@@ -18,8 +52,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove }
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       setKeys(prev => new Set(prev).add(e.code));
-      if (e.code === 'Space') {
-        // Stomp logic handled by socket
+      if (e.code === controls.stomp) {
+        const isStunned = player?.debuffs.some(d => d.type === 'Stunned');
+        const isBroken = player?.debuffs.some(d => d.type === 'Broken');
+        if (!isStunned && !isBroken) onStomp();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => setKeys(prev => {
@@ -35,28 +71,53 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove }
     };
   }, []);
 
+  const lastMoveTime = useRef(0);
+  const lerpPos = useRef({ x: player?.x || 0, y: player?.y || 0 });
+
   useEffect(() => {
     let lastTime = 0;
+    // Accessibility announcements
+    const status = player?.debuffs.length ? player.debuffs[0].type : 'Ready';
+    if (status !== lastStatus.current) {
+      speak(status);
+      lastStatus.current = status;
+    }
+
     const loop = (time: number) => {
       const dt = time - lastTime;
       lastTime = time;
 
       if (player?.isAlive) {
+        // Smooth interpolation for local player
+        const targetX = player.x;
+        const targetY = player.y;
+        const dist = Math.sqrt(Math.pow(targetX - lerpPos.current.x, 2) + Math.pow(targetY - lerpPos.current.y, 2));
+        
+        // If server position is significantly different (e.g. teleport, collision correction), snap to it
+        if (dist > 120) {
+          lerpPos.current.x = targetX;
+          lerpPos.current.y = targetY;
+        } else if (keys.size === 0) {
+          // Only gently pull towards server position when NOT moving to settle position
+          lerpPos.current.x += (targetX - lerpPos.current.x) * 0.05;
+          lerpPos.current.y += (targetY - lerpPos.current.y) * 0.05;
+        }
+
         // Update Camera Effects
         const hasPanic = player.debuffs.some(d => d.type === 'Panic');
         const hasBroken = player.debuffs.some(d => d.type === 'Broken');
 
-        if (hasPanic) {
+        if (hasPanic || hasBroken) {
           setShake({
-            x: (Math.random() - 0.5) * 10,
-            y: (Math.random() - 0.5) * 10
+            x: (Math.random() - 0.5) * (hasBroken ? 4 : 10),
+            y: (Math.random() - 0.5) * (hasBroken ? 4 : 10)
           });
         } else {
           setShake({ x: 0, y: 0 });
         }
 
         if (hasBroken) {
-          setSway(Math.sin(time / 200) * 0.05);
+          setSway(Math.sin(time / 500) * 0.05);
         } else {
           setSway(0);
         }
@@ -65,12 +126,58 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove }
         if (keys.size > 0) {
           let dx = 0;
           let dy = 0;
-          if (keys.has('KeyW')) dy -= 1;
-          if (keys.has('KeyS')) dy += 1;
-          if (keys.has('KeyA')) dx -= 1;
-          if (keys.has('KeyD')) dx += 1;
+          if (keys.has(controls.up)) dy -= 1;
+          if (keys.has(controls.down)) dy += 1;
+          if (keys.has(controls.left)) dx -= 1;
+          if (keys.has(controls.right)) dx += 1;
+          
           if (dx !== 0 || dy !== 0) {
-            onMove({ x: dx, y: dy });
+            const now = Date.now();
+            if (now - lastMoveTime.current > 40) { 
+              // Client-side prediction
+              const speed = 5;
+              const radius = 15;
+              
+              let moveX = dx;
+              let moveY = dy;
+              if (moveX !== 0 && moveY !== 0) {
+                const length = Math.sqrt(moveX * moveX + moveY * moveY);
+                moveX /= length;
+                moveY /= length;
+              }
+
+              const checkCollision = (x: number, y: number) => {
+                const points = [
+                  { x: x - radius, y: y - radius },
+                  { x: x + radius, y: y - radius },
+                  { x: x - radius, y: y + radius },
+                  { x: x + radius, y: y + radius }
+                ];
+                return points.some(p => {
+                  const gx = Math.floor(p.x / 50);
+                  const gy = Math.floor(p.y / 50);
+                  return gx < 0 || gx >= room.settings.mapSize || gy < 0 || gy >= room.settings.mapSize || room.map[gy][gx] === 1;
+                });
+              };
+
+              const nextX = lerpPos.current.x + moveX * speed;
+              const nextY = lerpPos.current.y + moveY * speed;
+
+              if (!checkCollision(nextX, nextY)) {
+                lerpPos.current.x = nextX;
+                lerpPos.current.y = nextY;
+              } else {
+                // Sliding
+                if (!checkCollision(nextX, lerpPos.current.y)) {
+                  lerpPos.current.x = nextX;
+                } else if (!checkCollision(lerpPos.current.x, nextY)) {
+                  lerpPos.current.y = nextY;
+                }
+              }
+
+              onMove({ x: dx, y: dy });
+              lastMoveTime.current = now;
+            }
           }
         }
       }
@@ -85,130 +192,205 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove }
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      ctx.fillStyle = '#050505';
+      ctx.fillStyle = '#020202';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.save();
-      // Apply Camera Effects
+      // Apply Camera Effects & Interpolated Position
       ctx.translate(canvas.width / 2 + shake.x, canvas.height / 2 + shake.y);
       ctx.rotate(sway);
-      ctx.translate(-player.x, -player.y);
+      ctx.translate(-lerpPos.current.x, -lerpPos.current.y);
 
-      // Draw Map
-      ctx.fillStyle = '#111111';
-      room.map.forEach((row, y) => {
-        row.forEach((cell, x) => {
-          if (cell === 1) ctx.fillRect(x * 50, y * 50, 50, 50);
-        });
-      });
+      // Draw Sonar for ALL players (Shared View)
+      room.players.forEach(p => {
+        if (!p.isAlive) return;
+        
+        // Only draw sonar if moving or stomping
+        // For local player, we use keys. For others, we rely on server state
+        const isLocal = p.id === playerId;
+        const isMoving = isLocal ? (keys.has('KeyW') || keys.has('KeyS') || keys.has('KeyA') || keys.has('KeyD')) : p.isMoving;
+        const isStomping = isLocal ? keys.has('Space') : false; // Stomp is usually a one-shot, but we can visualize it
 
-      // Draw Mines (Explosion flash)
-      room.mines.forEach(m => {
-        if (m.isExploded && m.explosionTime && Date.now() - m.explosionTime < 500) {
-          ctx.beginPath();
-          ctx.arc(m.x, m.y, 100, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255, 255, 255, ${1 - (Date.now() - m.explosionTime) / 500})`;
-          ctx.fill();
+        if (isMoving || isStomping) {
+          drawSonar(ctx, p.x, p.y, p, isStomping);
         }
       });
-
-      // Draw Sonar
-      drawSonar(ctx, player);
 
       // Draw Players
       room.players.forEach(p => {
         if (!p.isAlive) return;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = p.id === playerId ? '#ffffff' : '#444444';
+        ctx.fillStyle = p.id === playerId ? '#ffffff' : '#333333';
         ctx.fill();
+        
+        // Name tag for others
+        if (p.id !== playerId) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+          ctx.font = '10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(p.name, p.x, p.y - 20);
+        }
       });
 
       ctx.restore();
     };
 
-    const drawSonar = (ctx: CanvasRenderingContext2D, p: Player) => {
-      const isStomp = keys.has('Space') && !p.debuffs.some(d => d.type === 'Stunned');
+    const drawSonar = (ctx: CanvasRenderingContext2D, px: number, py: number, p: Player, isStompOverride?: boolean) => {
+      const isStomp = isStompOverride !== undefined ? isStompOverride : (keys.has('Space') && !p.debuffs.some(d => d.type === 'Stunned'));
       const isBroken = p.debuffs.some(d => d.type === 'Broken');
       const isConcussed = p.debuffs.some(d => d.type === 'Concussed');
       const isPanic = p.debuffs.some(d => d.type === 'Panic');
 
-      let rayCount = isStomp ? 32 : 16;
-      let maxDist = isStomp ? 600 : 300;
+      // Distance logic: 1 model = 30 units (radius 15 * 2)
+      // Average distance = 5 models (150 units)
+      // Sonar distance = slightly more than average (e.g., 8 models = 240 units)
+      const modelSize = p.radius * 2;
+      let rayCount = 16;
+      let maxDist = modelSize * 8; // ~240 units
       
-      if (isBroken) { rayCount = 8; maxDist = 100; }
-      else if (isConcussed) { maxDist = 150; }
+      if (isStomp) {
+        rayCount = 32; // Double rays
+        maxDist = modelSize * 16; // Double distance (~480 units)
+      }
+      
+      if (isBroken) { 
+        rayCount = 8; 
+        maxDist = modelSize * 2; 
+      } else if (isConcussed) { 
+        maxDist = modelSize * 5; 
+      }
 
       const angleStep = (Math.PI * 2) / rayCount;
 
+      // Draw Mines (ONLY during Stomp)
+      if (isStomp) {
+        room.mines.forEach(m => {
+          if (m.isExploded) return;
+          const dx = m.x - px;
+          const dy = m.y - py;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < maxDist) {
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, 15, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+        });
+      }
+
+      // Draw Mines (Explosion flash)
+      room.mines.forEach(m => {
+        if (m.isExploded && m.explosionTime && Date.now() - m.explosionTime < 500) {
+          const age = (Date.now() - m.explosionTime) / 500;
+          ctx.beginPath();
+          ctx.arc(m.x, m.y, 150 * age, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255, 255, 255, ${1 - age})`;
+          ctx.fill();
+        }
+      });
+
       for (let i = 0; i < rayCount; i++) {
         const angle = i * angleStep;
-        let color = 'rgba(255, 255, 255, 0.1)';
-        let thickness = 1;
+        
+        let hitDist = maxDist;
+        let hitWall = false;
+        let wallX = 0, wallY = 0;
 
-        if (isBroken) color = 'rgba(255, 105, 180, 0.5)';
-        else if (isPanic) color = 'rgba(255, 0, 0, 0.5)';
-        else if (isConcussed) color = 'rgba(128, 128, 128, 0.5)';
-
-        // Check Exit
-        if (room.exitPosition && !isConcussed && !isBroken) {
-          const dx = room.exitPosition.x - p.x;
-          const dy = room.exitPosition.y - p.y;
-          const distToExit = Math.sqrt(dx*dx + dy*dy);
-          const angleToExit = Math.atan2(dy, dx);
-          if (Math.abs(angle - angleToExit) < 0.1 && distToExit < maxDist) {
-            color = 'rgba(0, 255, 0, 0.8)';
-            thickness = 2;
+        // Raycast against walls
+        for (let d = 0; d < maxDist; d += 10) {
+          const rx = px + Math.cos(angle) * d;
+          const ry = py + Math.sin(angle) * d;
+          const gx = Math.floor(rx / 50);
+          const gy = Math.floor(ry / 50);
+          const mapSize = room.settings.mapSize;
+          if (gx >= 0 && gx < mapSize && gy >= 0 && gy < mapSize && room.map[gy][gx] === 1) {
+            hitDist = d;
+            hitWall = true;
+            wallX = gx;
+            wallY = gy;
+            break;
           }
         }
 
-        // Check Monsters
+        let baseColor = '255, 255, 255';
+        let isSpecialHit = false;
+
+        // Check Exit (Green)
+        if (room.exitPosition && !isConcussed && !isBroken) {
+          const dx = room.exitPosition.x - px;
+          const dy = room.exitPosition.y - py;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          const ang = Math.atan2(dy, dx);
+          
+          let angleDiff = Math.abs(angle - ang);
+          if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+          if (dist < hitDist && angleDiff < 0.1) {
+            baseColor = '0, 255, 0';
+            isSpecialHit = true;
+            playTone(800, 'sine', 0.1, 0.1);
+          }
+        }
+
+        // Check Monsters (Specific colors)
         room.monsters.forEach(m => {
           if (isConcussed || isBroken) return;
-          const dx = m.x - p.x;
-          const dy = m.y - p.y;
-          const distToMonster = Math.sqrt(dx*dx + dy*dy);
-          const angleToMonster = Math.atan2(dy, dx);
           
-          if (Math.abs(angle - angleToMonster) < 0.1 && distToMonster < maxDist) {
-            if (m.type === 'Hunter') color = 'rgba(255, 0, 0, 0.8)';
-            else if (m.type === 'Screamer') color = 'rgba(255, 165, 0, 0.8)';
-            else if (m.type === 'Patroller') color = 'rgba(128, 0, 128, 0.8)';
-            else if (m.type === 'Mimic') color = 'rgba(255, 255, 255, 0.8)'; // Mimic looks like player
-            thickness = 4 - (distToMonster / maxDist) * 3;
+          // Screamer is invisible in Ambush unless Stomping
+          if (m.type === 'Screamer' && m.phase === 'Ambush' && !isStomp) return;
 
-            // Draw Mimic as circle if hit
-            if (m.type === 'Mimic') {
-              ctx.beginPath();
-              ctx.arc(m.x, m.y, 15, 0, Math.PI * 2);
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-              ctx.fill();
+          const dx = m.x - px;
+          const dy = m.y - py;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          const ang = Math.atan2(dy, dx);
+          
+          let angleDiff = Math.abs(angle - ang);
+          if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+          if (dist < hitDist && angleDiff < 0.1) {
+            if (m.phase === 'Rest' || m.phase === 'Sleep') {
+              baseColor = '150, 150, 150'; // Gray when resting/sleeping
+              playTone(200, 'square', 0.05, 0.05);
+            } else {
+              if (m.type === 'Hunter') { baseColor = '255, 0, 0'; playTone(100, 'sawtooth', 0.1, 0.1); }
+              else if (m.type === 'Screamer') { baseColor = '255, 165, 0'; playTone(400, 'triangle', 0.1, 0.1); }
+              else if (m.type === 'Patroller') { baseColor = '128, 0, 128'; playTone(300, 'sine', 0.1, 0.1); }
+              else if (m.type === 'Mimic') { baseColor = '255, 255, 255'; playTone(500, 'sine', 0.1, 0.1); }
             }
+            isSpecialHit = true;
           }
         });
 
-        // Stomp reveals mines
-        if (isStomp) {
-          room.mines.forEach(m => {
-            if (m.isExploded) return;
-            const dx = m.x - p.x;
-            const dy = m.y - p.y;
-            const distToMine = Math.sqrt(dx*dx + dy*dy);
-            if (distToMine < maxDist) {
-              ctx.beginPath();
-              ctx.arc(m.x, m.y, 15, 0, Math.PI * 2);
-              ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-              ctx.stroke();
-            }
-          });
+        if (isPanic && !isSpecialHit) baseColor = '255, 0, 0';
+        else if (isConcussed && !isSpecialHit) baseColor = '150, 150, 150';
+        else if (isBroken) {
+          baseColor = '255, 105, 180'; // Pink
+          isSpecialHit = false; // Cannot distinguish anything
         }
 
+        // Gradient for "fading" effect
+        const grad = ctx.createLinearGradient(px, py, px + Math.cos(angle) * hitDist, py + Math.sin(angle) * hitDist);
+        grad.addColorStop(0, `rgba(${baseColor}, ${isSpecialHit ? 0.8 : 0.3})`);
+        grad.addColorStop(1, `rgba(${baseColor}, 0)`);
+
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x + Math.cos(angle) * maxDist, p.y + Math.sin(angle) * maxDist);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = thickness;
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(angle) * hitDist, py + Math.sin(angle) * hitDist);
+        ctx.strokeStyle = grad;
+        
+        // Thickness changes based on distance (thicker when closer)
+        // Using a formula where thickness is higher at the start of the ray
+        ctx.lineWidth = isSpecialHit ? 3 : Math.max(0.5, 2 * (1 - hitDist / maxDist));
         ctx.stroke();
+
+        // Reveal wall softly
+        if (hitWall) {
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.05 * (1 - hitDist / maxDist)})`;
+          ctx.fillRect(wallX * 50, wallY * 50, 50, 50);
+          if (Math.random() < 0.05) playTone(150, 'sine', 0.02, 0.02); // Soft wall click
+        }
       }
     };
 

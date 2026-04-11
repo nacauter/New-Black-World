@@ -6,6 +6,7 @@ export type MonsterType = 'Hunter' | 'Screamer' | 'Mimic' | 'Patroller';
 export interface Player {
   id: string;
   name: string;
+  isBot?: boolean;
   isReady: boolean;
   isHost: boolean;
   x: number;
@@ -30,6 +31,12 @@ export interface Player {
     deaths: number;
     survivedDebuff: number;
     survivedBroken: number;
+    diedUnderDebuff: number;
+    diedUnderBroken: number;
+    killedByPatroller: number;
+    killedByHunter: number;
+    killedByScreamer: number;
+    killedByMimic: number;
   };
 }
 
@@ -38,12 +45,15 @@ export interface Monster {
   type: MonsterType;
   x: number;
   y: number;
-  phase: 'Search' | 'Hunt' | 'Rest' | 'Ambush' | 'Sleep' | 'Patrol' | 'Stunned';
+  phase: 'Search' | 'Hunt' | 'Rest' | 'Ambush' | 'Sleep' | 'Patrol' | 'Stunned' | 'StealingKey';
   phaseEndTime: number;
   targetId: string | null;
   lastMarkedX?: number;
   lastMarkedY?: number;
   mimicForm?: string; // Player name if mimicking
+  lastRayTime?: number;
+  lastKnownPlayerPos?: { x: number; y: number } | null;
+  stepCounter?: number;
 }
 
 export interface Mine {
@@ -52,6 +62,17 @@ export interface Mine {
   y: number;
   isExploded: boolean;
   explosionTime?: number;
+}
+
+export type Difficulty = 'Easy' | 'Medium' | 'Hard' | 'GOD';
+export type BranchDensity = 'None' | 'Low' | 'Medium' | 'High';
+
+export interface GameSettings {
+  difficulty: Difficulty;
+  seed: string;
+  mapSize: number; // 40, 60, 80 etc
+  branchDensity: BranchDensity;
+  password?: string;
 }
 
 export interface GameState {
@@ -65,7 +86,7 @@ export interface GameState {
   exitDoorOpen: boolean;
   map: number[][];
   seed: string;
-  difficulty: 'Easy' | 'Medium' | 'Hard' | 'GOD';
+  settings: GameSettings;
   lang: 'RU' | 'EN';
 }
 

@@ -17,23 +17,15 @@ export function useGame() {
     newSocket.on('roomCreated', (room) => setRoom(room));
     newSocket.on('roomUpdated', (room) => setRoom(room));
     newSocket.on('gameStarted', (room) => setRoom(room));
+    newSocket.on('gameOver', (room) => setRoom(room));
     newSocket.on('message', (msg) => setMessages(prev => [...prev, msg]));
+    newSocket.on('error', (err) => {});
     newSocket.on('exitOpened', () => setRoom(prev => prev ? { ...prev, exitDoorOpen: true } : null));
     
-    newSocket.on('gameStateUpdate', ({ monsters, players }) => {
+    newSocket.on('gameStateUpdate', ({ monsters, players }: { monsters: any[], players: Player[] }) => {
       setRoom(prev => {
         if (!prev) return null;
         return { ...prev, monsters, players };
-      });
-    });
-
-    newSocket.on('playerMoved', ({ id, x, y }) => {
-      setRoom(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          players: prev.players.map(p => p.id === id ? { ...p, x, y } : p)
-        };
       });
     });
 
@@ -46,8 +38,8 @@ export function useGame() {
     socket?.emit('createRoom', { name, settings });
   }, [socket]);
 
-  const joinRoom = useCallback((roomId: string, name: string) => {
-    socket?.emit('joinRoom', { roomId, name });
+  const joinRoom = useCallback((roomId: string, name: string, password?: string) => {
+    socket?.emit('joinRoom', { roomId, name, password });
   }, [socket]);
 
   const setReady = useCallback((ready: boolean) => {
@@ -70,6 +62,14 @@ export function useGame() {
     socket?.emit('stomp');
   }, [socket]);
 
+  const kickPlayer = useCallback((targetId: string) => {
+    socket?.emit('kickPlayer', targetId);
+  }, [socket]);
+
+  const addBot = useCallback(() => {
+    socket?.emit('addBot');
+  }, [socket]);
+
   return {
     socket,
     room,
@@ -81,6 +81,8 @@ export function useGame() {
     startGame,
     sendMessage,
     move,
-    stomp
+    stomp,
+    kickPlayer,
+    addBot
   };
 }
