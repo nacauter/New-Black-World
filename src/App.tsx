@@ -434,7 +434,8 @@ export default function App() {
 
   if (room && room.phase === 'GameOver') {
     const me = room.players.find(p => p.id === socket?.id);
-    const oldRank = getClassification(globalScore - (me?.score || 0));
+    const score = me?.score || 0;
+    const oldRank = getClassification(globalScore - score);
     const newRank = getClassification(globalScore);
     const rankChanged = oldRank !== newRank;
 
@@ -455,7 +456,7 @@ export default function App() {
           )}
           <div className="flex justify-between border-b border-zinc-800 pb-2">
             <span className="text-zinc-500 uppercase text-xs">{t.yourScore}</span>
-            <span className="font-mono text-white">{me?.score.toFixed(1)} PTS</span>
+            <span className="font-mono text-white">{score.toFixed(1)} PTS</span>
           </div>
           <div className="flex justify-between border-b border-zinc-800 pb-2">
             <span className="text-zinc-500 uppercase text-xs">{t.classifier}</span>
@@ -471,8 +472,41 @@ export default function App() {
   }
 
   if (room && room.phase === 'Playing') {
+    const isDead = player && !player.isAlive;
+
     return (
       <div className={`flex h-screen w-screen bg-black overflow-hidden ${settings.fullscreen ? 'fixed inset-0 z-[100]' : ''}`}>
+        {isDead && (
+          <div className="fixed inset-0 bg-red-950/80 flex items-center justify-center z-[120] p-4 backdrop-blur-sm">
+            <div className="bg-zinc-900 border border-red-900 p-8 rounded-lg max-w-sm w-full space-y-6 text-center shadow-[0_0_50px_rgba(153,27,27,0.4)]">
+              <div className="space-y-2">
+                <h3 className="text-4xl font-mono font-bold uppercase text-red-500 animate-pulse">{lang === 'RU' ? 'ВЫ МЕРТВЫ' : 'YOU ARE DEAD'}</h3>
+                <p className="text-zinc-400 text-sm">{lang === 'RU' ? 'Вас настигла пустота...' : 'The void has consumed you...'}</p>
+                <div className="pt-4 space-y-2">
+                  <div className="flex justify-between text-xs uppercase tracking-widest border-b border-zinc-800 pb-1">
+                    <span className="text-zinc-500">{t.killer}</span>
+                    <span className="text-red-400">
+                      {player.stats.killedByHunter > 0 ? 'Hunter' : 
+                       player.stats.killedByScreamer > 0 ? 'Screamer' : 
+                       player.stats.killedByPatroller > 0 ? 'Patroller' : 
+                       player.stats.killedByMimic > 0 ? 'Mimic' : 'Unknown'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs uppercase tracking-widest border-b border-zinc-800 pb-1">
+                    <span className="text-zinc-500">{t.yourScore}</span>
+                    <span className="text-white">{player.score.toFixed(1)} PTS</span>
+                  </div>
+                </div>
+              </div>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="w-full bg-white text-black font-bold py-3 rounded uppercase text-xs tracking-widest hover:bg-zinc-200 transition-colors"
+              >
+                {t.toMenu}
+              </button>
+            </div>
+          </div>
+        )}
         {showExitConfirm && (
           <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[110] p-4">
             <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-lg max-w-sm w-full space-y-6 text-center">

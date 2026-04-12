@@ -75,6 +75,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
   const lerpPos = useRef({ x: player?.x || 0, y: player?.y || 0 });
 
   useEffect(() => {
+    if (player && lerpPos.current.x === 0 && lerpPos.current.y === 0) {
+      lerpPos.current.x = player.x;
+      lerpPos.current.y = player.y;
+    }
+  }, [player]);
+
+  useEffect(() => {
     let lastTime = 0;
     // Accessibility announcements
     const status = player?.debuffs.length ? player.debuffs[0].type : 'Ready';
@@ -126,10 +133,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
         if (keys.size > 0) {
           let dx = 0;
           let dy = 0;
-          if (keys.has(controls.up)) dy -= 1;
-          if (keys.has(controls.down)) dy += 1;
-          if (keys.has(controls.left)) dx -= 1;
-          if (keys.has(controls.right)) dx += 1;
+          if (keys.has(controls.up) || keys.has('ArrowUp')) dy -= 1;
+          if (keys.has(controls.down) || keys.has('ArrowDown')) dy += 1;
+          if (keys.has(controls.left) || keys.has('ArrowLeft')) dx -= 1;
+          if (keys.has(controls.right) || keys.has('ArrowRight')) dx += 1;
           
           if (dx !== 0 || dy !== 0) {
             const now = Date.now();
@@ -168,9 +175,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
                 lerpPos.current.y = nextY;
               } else {
                 // Sliding
-                if (!checkCollision(nextX, lerpPos.current.y)) {
+                if (moveX !== 0 && !checkCollision(nextX, lerpPos.current.y)) {
                   lerpPos.current.x = nextX;
-                } else if (!checkCollision(lerpPos.current.x, nextY)) {
+                }
+                if (moveY !== 0 && !checkCollision(lerpPos.current.x, nextY)) {
                   lerpPos.current.y = nextY;
                 }
               }
@@ -178,6 +186,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
               onMove({ x: dx, y: dy });
               lastMoveTime.current = now;
             }
+          }
+        } else {
+          // No keys pressed, but we should still notify server that we stopped moving
+          // Actually, the server handles isMoving based on the last move event.
+          // But to be safe, we can send a 0,0 move once.
+          if (lastMoveTime.current !== 0) {
+            onMove({ x: 0, y: 0 });
+            lastMoveTime.current = 0;
           }
         }
       }
@@ -208,20 +224,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
         // Only draw sonar if moving or stomping
         // For local player, we use keys. For others, we rely on server state
         const isLocal = p.id === playerId;
-        const isMoving = isLocal ? (keys.has('KeyW') || keys.has('KeyS') || keys.has('KeyA') || keys.has('KeyD')) : p.isMoving;
-        const isStomping = isLocal ? keys.has('Space') : false; // Stomp is usually a one-shot, but we can visualize it
+        const isMoving = isLocal ? (keys.has(controls.up) || keys.has(controls.down) || keys.has(controls.left) || keys.has(controls.right)) : p.isMoving;
+        const isStomping = isLocal ? keys.has(controls.stomp) : false; 
 
         if (isMoving || isStomping) {
-          drawSonar(ctx, p.x, p.y, p, isStomping);
+          drawSonar(ctx, isLocal ? lerpPos.current.x : p.x, isLocal ? lerpPos.current.y : p.y, p, isStomping);
         }
       });
 
       // Draw Players
       room.players.forEach(p => {
         if (!p.isAlive) return;
+        const isLocal = p.id === playerId;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = p.id === playerId ? '#ffffff' : '#333333';
+        ctx.arc(isLocal ? lerpPos.current.x : p.x, isLocal ? lerpPos.current.y : p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = isLocal ? '#ffffff' : '#333333';
         ctx.fill();
         
         // Name tag for others

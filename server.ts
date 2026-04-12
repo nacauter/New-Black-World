@@ -220,7 +220,7 @@ async function startServer() {
             });
           };
 
-          // Try full movement
+          // Try sliding X
           const nextX = player.x + moveX * speed;
           const nextY = player.y + moveY * speed;
 
@@ -228,11 +228,12 @@ async function startServer() {
             player.x = nextX;
             player.y = nextY;
           } else {
-            // Try sliding X
-            if (!checkCollision(nextX, player.y)) {
+            // Try sliding X only
+            if (moveX !== 0 && !checkCollision(nextX, player.y)) {
               player.x = nextX;
-            } else if (!checkCollision(player.x, nextY)) {
-              // Try sliding Y
+            }
+            // Try sliding Y only
+            if (moveY !== 0 && !checkCollision(player.x, nextY)) {
               player.y = nextY;
             }
           }
