@@ -270,7 +270,13 @@ const translations = {
 
 export default function App() {
   const { room, messages, roomList, createRoom, joinRoom, setReady, startGame, sendMessage, move, stomp, kickPlayer, addBot, socket } = useGame();
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() => {
+    return localStorage.getItem('blackworld_player_name') || '';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blackworld_player_name', name);
+  }, [name]);
   const [view, setView] = useState<'Menu' | 'Lobby' | 'Game' | 'Help' | 'Achievements' | 'Settings' | 'Addons'>('Menu');
   const [chatInput, setChatInput] = useState('');
   const [lang, setLang] = useState<'RU' | 'EN'>('RU');
@@ -518,7 +524,8 @@ export default function App() {
               <div className="flex gap-4">
                 <button 
                   onClick={() => {
-                    setGlobalScore(prev => Math.max(0, prev - 5));
+                    const newScore = Math.max(0, globalScore - 5);
+                    localStorage.setItem('blackworld_score', newScore.toString());
                     window.location.reload();
                   }} 
                   className="flex-1 bg-red-600 text-white font-bold py-3 rounded uppercase text-xs tracking-widest hover:bg-red-700 transition-colors"
@@ -575,10 +582,14 @@ export default function App() {
       style={{ backgroundImage: 'linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url("/bg.png")' }}
     >
       {view === 'Menu' && (
-        <div className="fixed top-8 right-8 z-50 text-right">
+        <div className="fixed top-8 right-8 z-50 text-right space-y-1">
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest">{t.classifier}</div>
           <div className="text-xl font-mono text-yellow-500">{getClassification(globalScore)}</div>
           <div className="text-xs text-zinc-600">{globalScore.toFixed(1)} PTS</div>
+          <div className="pt-4 flex flex-col items-end gap-1 text-[8px] font-mono text-zinc-700 uppercase tracking-tighter">
+            <span>{t.version}</span>
+            <span>{t.serverStatus}</span>
+          </div>
         </div>
       )}
 
@@ -844,7 +855,7 @@ export default function App() {
               </div>
             </div>
           </div>
-          <div className="pt-4 border-t border-zinc-800 flex justify-between text-[10px] font-mono text-zinc-600 uppercase">
+          <div className="pt-4 border-t border-zinc-800 flex justify-between text-[10px] font-mono text-zinc-600 uppercase opacity-50">
             <span>{t.version}</span>
             <span>{t.serverStatus}</span>
           </div>
@@ -852,11 +863,11 @@ export default function App() {
       )}
 
       {view === 'Lobby' && room && (
-        <div className="fixed top-1/2 -translate-y-1/2 left-12 max-w-4xl w-full h-[80vh] flex flex-col gap-8 z-10">
-          <div className="flex justify-between items-center border-b border-zinc-800 pb-4">
+        <div className="fixed top-1/2 -translate-y-1/2 left-12 max-w-4xl w-full h-[90vh] flex flex-col gap-4 z-10">
+          <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
             <div className="flex items-center gap-4">
               <div>
-                <h2 className="text-2xl font-mono font-bold uppercase flex items-center gap-2">
+                <h2 className="text-xl font-mono font-bold uppercase flex items-center gap-2">
                   Room: {room.id}
                   <button 
                     onClick={() => {
@@ -865,43 +876,43 @@ export default function App() {
                     className="p-1 hover:bg-zinc-800 rounded transition-colors text-zinc-500"
                     title="Copy ID"
                   >
-                    <Shield size={14} />
+                    <Shield size={12} />
                   </button>
                 </h2>
-                <p className="text-xs text-zinc-500 uppercase tracking-widest">{t.waiting}</p>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest">{t.waiting}</p>
               </div>
             </div>
-            <button onClick={() => window.location.reload()} className="text-zinc-500 hover:text-white transition-colors flex items-center gap-2 text-xs uppercase font-bold">
-              <LogOut size={20} /> {lang === 'RU' ? 'Выйти' : 'Leave'}
+            <button onClick={() => window.location.reload()} className="text-zinc-500 hover:text-white transition-colors flex items-center gap-2 text-[10px] uppercase font-bold">
+              <LogOut size={16} /> {lang === 'RU' ? 'Выйти' : 'Leave'}
             </button>
           </div>
 
-          <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-8 overflow-hidden">
-            <div className="space-y-4 flex flex-col">
-              <div className="flex items-center gap-2 text-zinc-400 text-xs uppercase tracking-widest">
-                <Users size={14} /> {t.players} ({room.players.length}/10)
+          <div className="flex-1 grid grid-cols-2 gap-4 overflow-hidden">
+            <div className="space-y-2 flex flex-col min-h-0">
+              <div className="flex items-center gap-2 text-zinc-400 text-[10px] uppercase tracking-widest">
+                <Users size={12} /> {t.players} ({room.players.length}/10)
               </div>
-              <div className="flex-1 space-y-2 overflow-y-auto pr-2">
+              <div className="flex-1 space-y-1 overflow-y-auto pr-2 scrollbar-hide">
                 {room.players.map(p => (
-                  <div key={p.id} className="p-4 bg-zinc-900 border border-zinc-800 rounded flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${p.isReady || p.isHost ? 'bg-green-500' : 'bg-zinc-700'}`} />
-                      <span className="font-mono">{p.name} {p.isHost && <span className="text-[10px] text-zinc-500 ml-2">{t.hostLabel}</span>}</span>
+                  <div key={p.id} className="p-2 bg-zinc-900 border border-zinc-800 rounded flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full ${p.isReady || p.isHost ? 'bg-green-500' : 'bg-zinc-700'}`} />
+                      <span className="font-mono text-sm">{p.name} {p.isHost && <span className="text-[8px] text-zinc-500 ml-1">{t.hostLabel}</span>}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {room.players.find(me => me.id === socket?.id)?.isHost && !p.isHost && (
                         <button
                           onClick={() => kickPlayer(p.id)}
-                          className="p-2 text-red-500 hover:bg-red-900/20 rounded transition-colors"
+                          className="p-1 text-red-500 hover:bg-red-900/20 rounded transition-colors"
                           title="Kick"
                         >
-                          <LogOut size={14} />
+                          <LogOut size={12} />
                         </button>
                       )}
                       {p.id === socket?.id && (
                         <button
                           onClick={() => setReady(!p.isReady)}
-                          className={`px-4 py-1 rounded text-xs font-bold uppercase transition-colors ${
+                          className={`px-3 py-0.5 rounded text-[10px] font-bold uppercase transition-colors ${
                             p.isReady ? 'bg-green-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
                           }`}
                         >
@@ -914,18 +925,18 @@ export default function App() {
               </div>
               
               {room.players.find(p => p.id === socket?.id)?.isHost && (
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-2">
                   <button 
                     onClick={addBot}
-                    className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-4 rounded uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded uppercase text-[10px] tracking-widest transition-all flex items-center justify-center gap-2"
                   >
-                    <Users size={18} />
+                    <Users size={14} />
                     {t.addBot}
                   </button>
                   <button
                     onClick={startGame}
                     disabled={!room.players.every(p => p.isReady || p.isHost)}
-                    className="flex-[2] bg-white text-black font-bold py-4 rounded hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all uppercase tracking-widest"
+                    className="flex-[2] bg-white text-black font-bold py-3 rounded hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all uppercase text-[10px] tracking-widest"
                   >
                     {t.startGame}
                   </button>
@@ -933,32 +944,32 @@ export default function App() {
               )}
             </div>
 
-            <div className="flex flex-col bg-zinc-900/50 border border-zinc-800 rounded overflow-hidden">
-              <div className="p-3 border-b border-zinc-800 flex items-center gap-2 text-zinc-500 text-[10px] uppercase tracking-widest">
-                <MessageSquare size={12} /> {t.lobbyChat}
+            <div className="flex flex-col bg-zinc-900/50 border border-zinc-800 rounded overflow-hidden min-h-0">
+              <div className="p-2 border-b border-zinc-800 flex items-center gap-2 text-zinc-500 text-[8px] uppercase tracking-widest">
+                <MessageSquare size={10} /> {t.lobbyChat}
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-hide">
+              <div className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-hide">
                 {messages.map(m => (
-                  <div key={m.id} className="text-sm">
-                    <span className="text-zinc-500 font-mono mr-2">{m.sender}:</span>
+                  <div key={m.id} className="text-[11px]">
+                    <span className="text-zinc-500 font-mono mr-1">{m.sender}:</span>
                     <span className="text-zinc-300">{m.text}</span>
                   </div>
                 ))}
               </div>
-              <div className="p-3 border-t border-zinc-800 flex gap-2">
+              <div className="p-2 border-t border-zinc-800 flex gap-2">
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && chatInput.trim() && (sendMessage(chatInput), setChatInput(''))}
                   placeholder={t.typeMessage}
-                  className="flex-1 bg-black border border-zinc-800 rounded px-3 py-2 text-xs focus:outline-none focus:border-zinc-600"
+                  className="flex-1 bg-black border border-zinc-800 rounded px-2 py-1.5 text-[10px] focus:outline-none focus:border-zinc-600"
                 />
                 <button 
                   onClick={() => chatInput.trim() && (sendMessage(chatInput), setChatInput(''))}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-2 rounded transition-colors"
+                  className="bg-zinc-800 hover:bg-zinc-700 text-white px-2 py-1.5 rounded transition-colors"
                 >
-                  <MessageSquare size={14} />
+                  <MessageSquare size={12} />
                 </button>
               </div>
             </div>

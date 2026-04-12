@@ -194,7 +194,7 @@ async function startServer() {
         if (player && player.isAlive) {
           player.isMoving = input.x !== 0 || input.y !== 0;
           
-          const speed = 5;
+          const speed = 10;
           const radius = 15;
           
           // Normalize diagonal movement
@@ -207,13 +207,17 @@ async function startServer() {
           }
 
           const checkCollision = (x: number, y: number) => {
-            const points = [
+            const checkPoints = [
               { x: x - radius, y: y - radius },
               { x: x + radius, y: y - radius },
               { x: x - radius, y: y + radius },
-              { x: x + radius, y: y + radius }
+              { x: x + radius, y: y + radius },
+              { x: x - radius, y: y },
+              { x: x + radius, y: y },
+              { x: x, y: y - radius },
+              { x: x, y: y + radius }
             ];
-            return points.some(p => {
+            return checkPoints.some(p => {
               const gx = Math.floor(p.x / 50);
               const gy = Math.floor(p.y / 50);
               return gx < 0 || gx >= room.settings.mapSize || gy < 0 || gy >= room.settings.mapSize || room.map[gy][gx] === 1;
@@ -516,32 +520,33 @@ async function startServer() {
         }
 
         // Monster Raycast Detection
-        // Screamer in Ambush emits rays every 10 seconds (approx 100 intervals at 100ms)
-        const isScreamerAmbushRay = m.type === 'Screamer' && m.phase === 'Ambush' && m.stepCounter % 100 === 0;
-        const isNormalRay = m.stepCounter % 3 === 0 && m.phase !== 'Rest' && m.phase !== 'Sleep' && m.phase !== 'Stunned' && m.phase !== 'Ambush';
+        // Every 3rd step (300ms), monsters emit 16 rays to detect moving players
+        const isNormalRay = m.stepCounter % 3 === 0 && m.phase !== 'Rest' && m.phase !== 'Sleep' && m.phase !== 'Stunned';
 
-        if (isScreamerAmbushRay || isNormalRay) {
+        if (isNormalRay) {
           const rayCount = 16;
-          const rayDist = m.phase === 'Ambush' ? 800 : 600;
+          const rayDist = m.type === 'Screamer' && m.phase === 'Ambush' ? 800 : 600;
           const angleStep = (Math.PI * 2) / rayCount;
 
           for (let i = 0; i < rayCount; i++) {
             const angle = i * angleStep;
             let hitDist = rayDist;
 
+            // Raycast against walls
             for (let d = 0; d < rayDist; d += 20) {
               const rx = m.x + Math.cos(angle) * d;
               const ry = m.y + Math.sin(angle) * d;
               const gx = Math.floor(rx / 50);
               const gy = Math.floor(ry / 50);
-              if (gx >= 0 && gx < 40 && gy >= 0 && gy < 40 && room.map[gy][gx] === 1) {
+              const mapSize = room.settings.mapSize;
+              if (gx >= 0 && gx < mapSize && gy >= 0 && gy < mapSize && room.map[gy][gx] === 1) {
                 hitDist = d;
                 break;
               }
             }
 
             room.players.forEach(p => {
-              if (!p.isAlive || !p.isMoving) return;
+              if (!p.isAlive || !p.isMoving) return; // ONLY detect if player is moving
               const dx = p.x - m.x;
               const dy = p.y - m.y;
               const dist = Math.sqrt(dx*dx + dy*dy);
@@ -549,7 +554,7 @@ async function startServer() {
               let angleDiff = Math.abs(angle - ang);
               if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
 
-              if (dist < hitDist && angleDiff < 0.15) {
+              if (dist < hitDist && angleDiff < 0.2) {
                 m.phase = 'Hunt';
                 m.targetId = p.id;
                 m.phaseEndTime = now + (m.type === 'Hunter' ? 30000 : 16000);

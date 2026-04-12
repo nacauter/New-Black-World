@@ -71,7 +71,54 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
     };
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (!player?.isAlive) return;
+      
+      let dx = 0;
+      let dy = 0;
+      if (e.code === controls.up || e.code === 'ArrowUp') dy = -1;
+      if (e.code === controls.down || e.code === 'ArrowDown') dy = 1;
+      if (e.code === controls.left || e.code === 'ArrowLeft') dx = -1;
+      if (e.code === controls.right || e.code === 'ArrowRight') dx = 1;
+
+      if (dx !== 0 || dy !== 0) {
+        onMove({ x: dx, y: dy });
+        // Stop moving after a short delay to make it a single step
+        setTimeout(() => onMove({ x: 0, y: 0 }), 100);
+        
+        const now = Date.now();
+        pulses.current.push({
+          x: 0,
+          y: 0,
+          startTime: now,
+          isStomp: false,
+          p: player
+        });
+      }
+      
+      if (e.code === controls.stomp && !player.debuffs.some(d => d.type === 'Stunned')) {
+        onStomp();
+        const now = Date.now();
+        pulses.current.push({
+          x: 0,
+          y: 0,
+          startTime: now,
+          isStomp: true,
+          p: player
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [controls, onMove, onStomp, player]);
+
   const lastMoveTime = useRef(0);
+  const pulses = useRef<{ x: number, y: number, startTime: number, isStomp: boolean, p: Player }[]>([]);
   const lerpPos = useRef({ x: player?.x || 0, y: player?.y || 0 });
 
   useEffect(() => {
@@ -95,19 +142,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
       lastTime = time;
 
       if (player?.isAlive) {
+        const now = Date.now();
+
+        // Clean up old pulses
+        pulses.current = pulses.current.filter(p => now - p.startTime < 1500);
+
         // Smooth interpolation for local player
         const targetX = player.x;
         const targetY = player.y;
         const dist = Math.sqrt(Math.pow(targetX - lerpPos.current.x, 2) + Math.pow(targetY - lerpPos.current.y, 2));
         
-        // If server position is significantly different (e.g. teleport, collision correction), snap to it
-        if (dist > 120) {
+        if (dist > 80) {
           lerpPos.current.x = targetX;
           lerpPos.current.y = targetY;
-        } else if (keys.size === 0) {
-          // Only gently pull towards server position when NOT moving to settle position
-          lerpPos.current.x += (targetX - lerpPos.current.x) * 0.05;
-          lerpPos.current.y += (targetY - lerpPos.current.y) * 0.05;
+        } else {
+          // Pull to server position
+          const pullStrength = player.isMoving ? 0.02 : 0.15;
+          lerpPos.current.x += (targetX - lerpPos.current.x) * pullStrength;
+          lerpPos.current.y += (targetY - lerpPos.current.y) * pullStrength;
         }
 
         // Update Camera Effects
@@ -127,74 +179,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
           setSway(Math.sin(time / 500) * 0.05);
         } else {
           setSway(0);
-        }
-
-        // Movement
-        if (keys.size > 0) {
-          let dx = 0;
-          let dy = 0;
-          if (keys.has(controls.up) || keys.has('ArrowUp')) dy -= 1;
-          if (keys.has(controls.down) || keys.has('ArrowDown')) dy += 1;
-          if (keys.has(controls.left) || keys.has('ArrowLeft')) dx -= 1;
-          if (keys.has(controls.right) || keys.has('ArrowRight')) dx += 1;
-          
-          if (dx !== 0 || dy !== 0) {
-            const now = Date.now();
-            if (now - lastMoveTime.current > 40) { 
-              // Client-side prediction
-              const speed = 5;
-              const radius = 15;
-              
-              let moveX = dx;
-              let moveY = dy;
-              if (moveX !== 0 && moveY !== 0) {
-                const length = Math.sqrt(moveX * moveX + moveY * moveY);
-                moveX /= length;
-                moveY /= length;
-              }
-
-              const checkCollision = (x: number, y: number) => {
-                const points = [
-                  { x: x - radius, y: y - radius },
-                  { x: x + radius, y: y - radius },
-                  { x: x - radius, y: y + radius },
-                  { x: x + radius, y: y + radius }
-                ];
-                return points.some(p => {
-                  const gx = Math.floor(p.x / 50);
-                  const gy = Math.floor(p.y / 50);
-                  return gx < 0 || gx >= room.settings.mapSize || gy < 0 || gy >= room.settings.mapSize || room.map[gy][gx] === 1;
-                });
-              };
-
-              const nextX = lerpPos.current.x + moveX * speed;
-              const nextY = lerpPos.current.y + moveY * speed;
-
-              if (!checkCollision(nextX, nextY)) {
-                lerpPos.current.x = nextX;
-                lerpPos.current.y = nextY;
-              } else {
-                // Sliding
-                if (moveX !== 0 && !checkCollision(nextX, lerpPos.current.y)) {
-                  lerpPos.current.x = nextX;
-                }
-                if (moveY !== 0 && !checkCollision(lerpPos.current.x, nextY)) {
-                  lerpPos.current.y = nextY;
-                }
-              }
-
-              onMove({ x: dx, y: dy });
-              lastMoveTime.current = now;
-            }
-          }
-        } else {
-          // No keys pressed, but we should still notify server that we stopped moving
-          // Actually, the server handles isMoving based on the last move event.
-          // But to be safe, we can send a 0,0 move once.
-          if (lastMoveTime.current !== 0) {
-            onMove({ x: 0, y: 0 });
-            lastMoveTime.current = 0;
-          }
         }
       }
 
@@ -217,18 +201,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
       ctx.rotate(sway);
       ctx.translate(-lerpPos.current.x, -lerpPos.current.y);
 
-      // Draw Sonar for ALL players (Shared View)
-      room.players.forEach(p => {
-        if (!p.isAlive) return;
-        
-        // Only draw sonar if moving or stomping
-        // For local player, we use keys. For others, we rely on server state
-        const isLocal = p.id === playerId;
-        const isMoving = isLocal ? (keys.has(controls.up) || keys.has(controls.down) || keys.has(controls.left) || keys.has(controls.right)) : p.isMoving;
-        const isStomping = isLocal ? keys.has(controls.stomp) : false; 
+      // Draw Sonar Pulses
+      const now = Date.now();
+      pulses.current.forEach(pulse => {
+        const age = now - pulse.startTime;
+        const duration = pulse.isStomp ? 1500 : 800;
+        if (age < duration) {
+          const opacity = 1 - (age / duration);
+          
+          // Find the player this pulse belongs to
+          const p = room.players.find(pl => pl.id === pulse.p.id);
+          if (!p || !p.isAlive) return;
 
-        if (isMoving || isStomping) {
-          drawSonar(ctx, isLocal ? lerpPos.current.x : p.x, isLocal ? lerpPos.current.y : p.y, p, isStomping);
+          // Use current player position (attached)
+          const px = p.id === playerId ? lerpPos.current.x : p.x;
+          const py = p.id === playerId ? lerpPos.current.y : p.y;
+
+          drawSonar(ctx, px, py, p, pulse.isStomp, opacity);
         }
       });
 
@@ -253,18 +242,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
       ctx.restore();
     };
 
-    const drawSonar = (ctx: CanvasRenderingContext2D, px: number, py: number, p: Player, isStompOverride?: boolean) => {
-      const isStomp = isStompOverride !== undefined ? isStompOverride : (keys.has('Space') && !p.debuffs.some(d => d.type === 'Stunned'));
+    const drawSonar = (ctx: CanvasRenderingContext2D, px: number, py: number, p: Player, isStompOverride?: boolean, opacity: number = 1) => {
+      const isStomp = isStompOverride !== undefined ? isStompOverride : (keys.has(controls.stomp) && !p.debuffs.some(d => d.type === 'Stunned'));
       const isBroken = p.debuffs.some(d => d.type === 'Broken');
       const isConcussed = p.debuffs.some(d => d.type === 'Concussed');
       const isPanic = p.debuffs.some(d => d.type === 'Panic');
 
       // Distance logic: 1 model = 30 units (radius 15 * 2)
-      // Average distance = 5 models (150 units)
-      // Sonar distance = slightly more than average (e.g., 8 models = 240 units)
+      // Average distance = 5 models = 150 units
       const modelSize = p.radius * 2;
       let rayCount = 16;
-      let maxDist = modelSize * 8; // ~240 units
+      let maxDist = modelSize * 8; // ~240 units (slightly more than average)
       
       if (isStomp) {
         rayCount = 32; // Double rays
@@ -289,24 +277,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
           const dist = Math.sqrt(dx*dx + dy*dy);
           if (dist < maxDist) {
             ctx.beginPath();
-            ctx.arc(m.x, m.y, 15, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.arc(m.x, m.y, 20, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
             ctx.lineWidth = 2;
             ctx.stroke();
           }
         });
       }
-
-      // Draw Mines (Explosion flash)
-      room.mines.forEach(m => {
-        if (m.isExploded && m.explosionTime && Date.now() - m.explosionTime < 500) {
-          const age = (Date.now() - m.explosionTime) / 500;
-          ctx.beginPath();
-          ctx.arc(m.x, m.y, 150 * age, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255, 255, 255, ${1 - age})`;
-          ctx.fill();
-        }
-      });
 
       for (let i = 0; i < rayCount; i++) {
         const angle = i * angleStep;
@@ -315,8 +292,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
         let hitWall = false;
         let wallX = 0, wallY = 0;
 
-        // Raycast against walls
-        for (let d = 0; d < maxDist; d += 10) {
+        // Raycast against walls - very fine step (2 units) for accuracy
+        for (let d = 0; d < maxDist; d += 2) {
           const rx = px + Math.cos(angle) * d;
           const ry = py + Math.sin(angle) * d;
           const gx = Math.floor(rx / 50);
@@ -347,7 +324,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
           if (dist < hitDist && angleDiff < 0.1) {
             baseColor = '0, 255, 0';
             isSpecialHit = true;
-            playTone(800, 'sine', 0.1, 0.1);
+            if (opacity > 0.8) playTone(800, 'sine', 0.1, 0.1);
           }
         }
 
@@ -368,15 +345,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
 
           if (dist < hitDist && angleDiff < 0.1) {
             if (m.phase === 'Rest' || m.phase === 'Sleep') {
-              baseColor = '150, 150, 150'; // Gray when resting/sleeping
-              playTone(200, 'square', 0.05, 0.05);
+              baseColor = '100, 100, 100'; // Darker gray
             } else {
-              if (m.type === 'Hunter') { baseColor = '255, 0, 0'; playTone(100, 'sawtooth', 0.1, 0.1); }
-              else if (m.type === 'Screamer') { baseColor = '255, 165, 0'; playTone(400, 'triangle', 0.1, 0.1); }
-              else if (m.type === 'Patroller') { baseColor = '128, 0, 128'; playTone(300, 'sine', 0.1, 0.1); }
-              else if (m.type === 'Mimic') { baseColor = '255, 255, 255'; playTone(500, 'sine', 0.1, 0.1); }
+              if (m.type === 'Hunter') baseColor = '255, 0, 0'; // Red
+              else if (m.type === 'Screamer') baseColor = '255, 165, 0'; // Orange
+              else if (m.type === 'Patroller') baseColor = '200, 0, 255'; // Purple
+              else if (m.type === 'Mimic') baseColor = '0, 200, 255'; // Cyan
             }
             isSpecialHit = true;
+            if (opacity > 0.8) {
+              if (m.type === 'Hunter') playTone(100, 'sawtooth', 0.1, 0.1);
+              else if (m.type === 'Screamer') playTone(400, 'triangle', 0.1, 0.1);
+              else playTone(300, 'sine', 0.1, 0.1);
+            }
           }
         });
 
@@ -384,12 +365,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
         else if (isConcussed && !isSpecialHit) baseColor = '150, 150, 150';
         else if (isBroken) {
           baseColor = '255, 105, 180'; // Pink
-          isSpecialHit = false; // Cannot distinguish anything
+          isSpecialHit = false; 
         }
 
         // Gradient for "fading" effect
         const grad = ctx.createLinearGradient(px, py, px + Math.cos(angle) * hitDist, py + Math.sin(angle) * hitDist);
-        grad.addColorStop(0, `rgba(${baseColor}, ${isSpecialHit ? 0.8 : 0.3})`);
+        grad.addColorStop(0, `rgba(${baseColor}, ${opacity * (isSpecialHit ? 0.8 : 0.3)})`);
         grad.addColorStop(1, `rgba(${baseColor}, 0)`);
 
         ctx.beginPath();
@@ -398,15 +379,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
         ctx.strokeStyle = grad;
         
         // Thickness changes based on distance (thicker when closer)
-        // Using a formula where thickness is higher at the start of the ray
-        ctx.lineWidth = isSpecialHit ? 3 : Math.max(0.5, 2 * (1 - hitDist / maxDist));
+        ctx.lineWidth = isSpecialHit ? 3 : Math.max(0.5, 3 * (1 - hitDist / maxDist));
         ctx.stroke();
 
         // Reveal wall softly
         if (hitWall) {
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.05 * (1 - hitDist / maxDist)})`;
+          ctx.fillStyle = `rgba(255, 255, 255, ${opacity * 0.05 * (1 - hitDist / maxDist)})`;
           ctx.fillRect(wallX * 50, wallY * 50, 50, 50);
-          if (Math.random() < 0.05) playTone(150, 'sine', 0.02, 0.02); // Soft wall click
         }
       }
     };
