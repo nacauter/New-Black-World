@@ -413,7 +413,11 @@ export default function App() {
     if (room?.phase === 'GameOver' && lastGamePhase === 'Playing') {
       const me = room.players.find(p => p.id === socket?.id);
       if (me) {
-        setGlobalScore(prev => prev + me.score);
+        setGlobalScore(prev => {
+          const newScore = Math.max(0, prev + me.score);
+          localStorage.setItem('blackworld_score', newScore.toString());
+          return newScore;
+        });
       }
     }
     setLastGamePhase(room?.phase || null);

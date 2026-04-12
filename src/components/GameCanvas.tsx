@@ -85,8 +85,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ room, playerId, onMove, 
 
       if (dx !== 0 || dy !== 0) {
         onMove({ x: dx, y: dy });
-        // Stop moving after a short delay to make it a single step
-        setTimeout(() => onMove({ x: 0, y: 0 }), 100);
+        // Increase step duration to 200ms to ensure server processes it
+        setTimeout(() => onMove({ x: 0, y: 0 }), 200);
         
         const now = Date.now();
         pulses.current.push({

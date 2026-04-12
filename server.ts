@@ -220,7 +220,8 @@ async function startServer() {
             return checkPoints.some(p => {
               const gx = Math.floor(p.x / 50);
               const gy = Math.floor(p.y / 50);
-              return gx < 0 || gx >= room.settings.mapSize || gy < 0 || gy >= room.settings.mapSize || room.map[gy][gx] === 1;
+              const mapSize = room.settings.mapSize;
+              return gx < 0 || gx >= mapSize || gy < 0 || gy >= mapSize || room.map[gy][gx] === 1;
             });
           };
 
